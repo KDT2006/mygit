@@ -311,7 +311,7 @@ func writeCommitObject(treeHash, parentHash []byte, message string) ([]byte, err
 		buf.WriteString(fmt.Sprintf("parent %x\n", parentHash))
 	}
 
-	// use placeholder author/committer for now
+	// TODO: replace with actual author/committer info
 	author := "Author <author@example.com>"
 	committer := "Committer <committer@example.com>"
 
