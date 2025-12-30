@@ -374,26 +374,33 @@ func handleCheckout() {
 func handleRemove() {
 	// define a flag set for rm
 	cmd := flag.NewFlagSet("rm", flag.ExitOnError)
+	cached := cmd.Bool("cached", false, "remove from index only, not from working directory")
 
 	cmd.Parse(os.Args[2:])
 
 	args := cmd.Args()
 	if len(args) != 1 {
-		fmt.Println("usage: " + vcsName + " rm <file>")
+		fmt.Println("usage: " + vcsName + " rm [--cached] <file>")
 		os.Exit(1)
 	}
 
 	targetPath := args[0]
 
-	// remove file from working directory
-	if err := os.Remove(targetPath); err != nil {
-		log.Fatalf("error removing file %s: %v", targetPath, err)
+	// remove file from working directory if not --cached
+	if !*cached {
+		if err := os.Remove(targetPath); err != nil {
+			log.Fatalf("error removing file %s: %v", targetPath, err)
+		}
 	}
 
 	// remove file from index
 	index, err := readIndex()
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	if _, ok := index[targetPath]; !ok {
+		log.Fatalf("file %s is not in the index", targetPath)
 	}
 
 	delete(index, targetPath)

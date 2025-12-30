@@ -8,7 +8,7 @@ mygit is a small, educational re-implementation of core Git concepts written in 
 - Blob/tree/commit objects with minimal, readable formats
 - Lightweight index that maps file paths to blob hashes
 - Basic refs in `.mygit/refs/heads/` and `HEAD`
-- Core commands: `init`, `hash-object`, `add`, `write-tree`, `cat-file`, `commit`, `log`, `branch`, `checkout`
+- Core commands: `init`, `hash-object`, `add`, `rm`, `write-tree`, `cat-file`, `commit`, `log`, `branch`, `checkout`
 
 ## Quick Start
 
@@ -31,6 +31,12 @@ Initialize a repository and make your first commit:
 # Add a file or a directory (recursively)
 echo "Hello mygit" > hello.txt
 ./mygit add hello.txt
+
+# Remove a file from the index and working directory
+./mygit rm hello.txt
+
+# Remove from index only (keep file on disk, becomes untracked)
+./mygit rm --cached hello.txt
 
 # Commit the tree
 ./mygit commit "Initial commit"
@@ -83,6 +89,7 @@ On Windows, replace `./mygit` with `mygit.exe`. You can also use `go run . <comm
 init                      Initialize a new repository
 hash-object <file>        Create a blob object for a file and print its hash
 add <path>                Stage a file or directory recursively into the index
+rm [--cached] <path>      Remove a file from index and disk (--cached: index only)
 write-tree                Build a tree object from the index and print its hash
 cat-file <hash>           Pretty-print an object (blob/tree/commit)
 commit <message>          Create a commit from the current tree (and parent)
@@ -96,7 +103,6 @@ checkout <branch>         Switch to a branch and restore the working tree
 - Educational clarity over completeness and performance
 - No networking/remotes, merges, staging metadata, or conflict resolution
 - Detached `HEAD` is not supported
-- Checkout may remove files not tracked in the index to match the target tree (be careful)
 
 ## Project Structure
 
