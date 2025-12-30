@@ -214,38 +214,75 @@ func removeNonIndexedFiles() error {
 		return err
 	}
 
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		return err
-	}
+	// Collect paths to remove (we collect first, then remove to avoid modifying during walk)
+	var filesToRemove []string
+	var dirsToRemove []string
 
-	for _, entry := range entries {
-		name := entry.Name()
-		if name == "."+vcsName {
-			continue // skip VCS dir
+	err = filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
 
-		if entry.IsDir() {
+		// Skip root directory
+		if path == "." {
+			return nil
+		}
+
+		// Skip VCS directory entirely
+		if d.IsDir() && d.Name() == "."+vcsName {
+			return filepath.SkipDir
+		}
+
+		// Normalize path separators for consistent comparison
+		normalizedPath := filepath.ToSlash(path)
+
+		if d.IsDir() {
 			// For directories, check if ANY indexed file has this directory as prefix
 			hasIndexedFiles := false
 			for indexPath := range index {
-				if strings.HasPrefix(indexPath, name+"/") || strings.HasPrefix(indexPath, name+"\\") {
+				normalizedIndexPath := filepath.ToSlash(indexPath)
+				if strings.HasPrefix(normalizedIndexPath, normalizedPath+"/") {
 					hasIndexedFiles = true
 					break
 				}
 			}
 			if !hasIndexedFiles {
-				if err := os.RemoveAll(name); err != nil {
-					return fmt.Errorf("error removing directory %s: %v", name, err)
-				}
+				dirsToRemove = append(dirsToRemove, path)
+				return filepath.SkipDir // Don't descend into directories we'll remove
 			}
 		} else {
-			// For files, check directly in the index
-			if _, exists := index[name]; !exists {
-				if err := os.Remove(name); err != nil {
-					return fmt.Errorf("error removing file %s: %v", name, err)
+			// For files, check if path exists in index (try both normalized and original)
+			found := false
+			for indexPath := range index {
+				normalizedIndexPath := filepath.ToSlash(indexPath)
+				if normalizedIndexPath == normalizedPath || indexPath == path {
+					found = true
+					break
 				}
 			}
+			if !found {
+				filesToRemove = append(filesToRemove, path)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("error walking directory: %v", err)
+	}
+
+	// Remove files first
+	for _, file := range filesToRemove {
+		if err := os.Remove(file); err != nil {
+			return fmt.Errorf("error removing file %s: %v", file, err)
+		}
+	}
+
+	// Remove directories (they should already be empty or contain only non-indexed files)
+	for _, dir := range dirsToRemove {
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("error removing directory %s: %v", dir, err)
 		}
 	}
 
