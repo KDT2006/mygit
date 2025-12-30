@@ -18,6 +18,11 @@ const (
 	entryTypeTree = 0040000 // directory
 )
 
+// Object represents a generic VCS object.
+type object interface {
+	String() string
+}
+
 // blobObject represents a blob object.
 type blobObject struct {
 	content []byte
@@ -369,7 +374,7 @@ func writeCommitObject(treeHash, parentHash []byte, message string) ([]byte, err
 }
 
 // catFile reads and parses an object file by its hash.
-func catFile(fileHash []byte) (interface{}, error) {
+func catFile(fileHash []byte) (object, error) {
 	if err := checkVCSRepo(); err != nil {
 		return nil, err
 	}
