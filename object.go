@@ -169,6 +169,18 @@ func createObject(data []byte) ([]byte, error) {
 	return hash[:], nil
 }
 
+// hashObject hashes the given data and returns its hash without storing it.
+func hashObject(data []byte) []byte {
+	// create blob header: "blob <size>\0"
+	header := fmt.Sprintf("blob %d\x00", len(data))
+	fullData := append([]byte(header), data...)
+
+	// compute SHA-1 hash
+	hash := sha1.Sum(fullData)
+
+	return hash[:]
+}
+
 // writeTreeObject creates a tree object and returns its hash.
 func writeTreeObject(entries []treeEntry) ([]byte, error) {
 	if err := checkVCSRepo(); err != nil {

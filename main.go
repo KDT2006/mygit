@@ -325,6 +325,11 @@ func handleCheckout() {
 
 	branchName := args[0]
 
+	// check if all changes are committed
+	if err := checkIndexMapping(); err != nil {
+		log.Fatal("please commit your changes before switching branches")
+	}
+
 	// check if branch is current branch
 	currentBranch, err := getCurrentBranch()
 	if err != nil {

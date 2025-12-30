@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -323,6 +324,28 @@ func checkoutCommit(commitHash []byte) error {
 
 	if err := removeNonIndexedFiles(); err != nil {
 		return fmt.Errorf("error removing non-indexed files: %v", err)
+	}
+
+	return nil
+}
+
+// checkIndexMapping checks if there's any change between the index and the working directory.
+func checkIndexMapping() error {
+	index, err := readIndex()
+	if err != nil {
+		return err
+	}
+
+	for targetPath, storedHash := range index {
+		content, err := os.ReadFile(targetPath)
+		if err != nil {
+			return fmt.Errorf("error reading file %s: %v", targetPath, err)
+		}
+
+		contentHash := hashObject(content)
+		if !slices.Equal(storedHash, contentHash) {
+			return fmt.Errorf("file %s has been modified", targetPath)
+		}
 	}
 
 	return nil
