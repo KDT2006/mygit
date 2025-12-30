@@ -38,6 +38,8 @@ func main() {
 		handleBranch()
 	case "checkout":
 		handleCheckout()
+	case "rm":
+		handleRemove()
 	default:
 		fmt.Printf("unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -367,4 +369,38 @@ func handleCheckout() {
 	}
 
 	fmt.Printf("Switched to branch %s\n", branchName)
+}
+
+func handleRemove() {
+	// define a flag set for rm
+	cmd := flag.NewFlagSet("rm", flag.ExitOnError)
+
+	cmd.Parse(os.Args[2:])
+
+	args := cmd.Args()
+	if len(args) != 1 {
+		fmt.Println("usage: " + vcsName + " rm <file>")
+		os.Exit(1)
+	}
+
+	targetPath := args[0]
+
+	// remove file from working directory
+	if err := os.Remove(targetPath); err != nil {
+		log.Fatalf("error removing file %s: %v", targetPath, err)
+	}
+
+	// remove file from index
+	index, err := readIndex()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	delete(index, targetPath)
+
+	err = writeIndex(index)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Removed %s\n", targetPath)
 }
