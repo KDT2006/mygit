@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -565,9 +564,4 @@ func printCommitHistory(commitHash []byte) error {
 	}
 
 	return printCommitHistory(commitObj.parent)
-}
-
-// getObjectPath returns the path to an object file given its hash.
-func getObjectPath(hash []byte) string {
-	return filepath.Join(fmt.Sprintf(".%s", vcsName), "objects", fmt.Sprintf("%x", hash[:1]), fmt.Sprintf("%x", hash[1:]))
 }

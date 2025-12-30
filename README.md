@@ -1,4 +1,4 @@
-# mygit — A Minimal Git Clone for Learning
+# mygit - A Minimal Git Clone for Learning
 
 mygit is a small, educational re-implementation of core Git concepts written in Go. It was built to explore how Git works under the hood: object storage, trees, commits, references, and basic branch/checkout flows. This project is not intended for production use, but as a hands-on learning tool.
 
@@ -31,9 +31,6 @@ Initialize a repository and make your first commit:
 # Add a file or a directory (recursively)
 echo "Hello mygit" > hello.txt
 ./mygit add hello.txt
-
-# Write the current index to a tree object
-./mygit write-tree
 
 # Commit the tree
 ./mygit commit "Initial commit"
@@ -107,7 +104,6 @@ checkout <branch>         Switch to a branch and restore the working tree
 - `object.go` — object formats, hashing, read/write utilities
 - `index.go` — index read/write and directory staging
 - `refs.go` — refs, branch/checkout, and working tree restore
-- `test/` — small fixture(s); unit tests in `*_test.go`
 
 ## Testing
 
