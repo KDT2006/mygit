@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
@@ -40,6 +41,8 @@ func main() {
 		handleCheckout()
 	case "rm":
 		handleRemove()
+	case "merge":
+		handleMerge()
 	default:
 		fmt.Printf("unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -135,12 +138,6 @@ func handleWriteTree() {
 
 	cmd.Parse(os.Args[2:])
 
-	// args := cmd.Args()
-	// if len(args) < 1 {
-	// 	fmt.Println("usage: " + vcsName + " write-tree")
-	// 	os.Exit(1)
-	// }
-
 	// read the index file
 	index, err := readIndex()
 	if err != nil {
@@ -169,7 +166,13 @@ func handleCatFile() {
 		os.Exit(1)
 	}
 
-	content, err := catFile([]byte(args[len(args)-1]))
+	// decode hex string from CLI to binary hash
+	hashBytes, err := hex.DecodeString(args[len(args)-1])
+	if err != nil {
+		log.Fatalf("invalid hash: %v", err)
+	}
+
+	content, err := catFile(hashBytes)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -215,7 +218,7 @@ func handleCommit() {
 	}
 
 	// create commit object
-	commitHash, err := writeCommitObject(treeHash, refHash, message)
+	commitHash, err := writeCommitObject(treeHash, [][]byte{refHash}, message)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -410,4 +413,34 @@ func handleRemove() {
 		log.Fatal(err)
 	}
 	fmt.Printf("Removed %s\n", targetPath)
+}
+
+func handleMerge() {
+	// define a flag set for merge
+	cmd := flag.NewFlagSet("merge", flag.ExitOnError)
+
+	cmd.Parse(os.Args[2:])
+
+	args := cmd.Args()
+	if len(args) != 1 {
+		fmt.Println("usage: " + vcsName + " merge <branch-name>")
+		os.Exit(1)
+	}
+
+	branchName := args[0]
+
+	// check for uncommitted changes
+	if err := checkUncommittedChanges(); err != nil {
+		log.Fatal("please commit your changes before merging branches")
+	}
+
+	// check for unstaged changes
+	if err := checkUnstagedChanges(); err != nil {
+		log.Fatal("please stage your changes before merging branches")
+	}
+
+	// merge the specified branch into the current branch
+	if err := mergeBranch(branchName); err != nil {
+		log.Fatal(err)
+	}
 }

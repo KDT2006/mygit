@@ -3,7 +3,6 @@ package main
 import (
 	"compress/flate"
 	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"testing"
@@ -169,9 +168,8 @@ func TestBuildTreeObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error building tree object: %v", err)
 	}
-	rootHashEncoded := hex.EncodeToString(rootHash)
 
-	content, err := catFile([]byte(rootHashEncoded))
+	content, err := catFile(rootHash) // rootHash is already binary
 	if err != nil {
 		t.Fatalf("error catting root tree object: %v", err)
 	}
@@ -203,7 +201,7 @@ func TestBuildTreeObject(t *testing.T) {
 	assert.True(t, exists, "subdir entry should exist")
 	assert.Equal(t, "tree", subdirEntry.objType, "subdir should be a tree")
 
-	subdirContent, err := catFile([]byte(subdirEntry.hash))
+	subdirContent, err := catFile(subdirEntry.hash) // hash is already binary
 	if err != nil {
 		t.Fatalf("error catting subdir tree object: %v", err)
 	}
@@ -227,7 +225,7 @@ func TestBuildTreeObject(t *testing.T) {
 	assert.True(t, exists, "nested entry should exist")
 	assert.Equal(t, "tree", nestedEntry.objType, "nested should be a tree")
 
-	nestedContent, err := catFile([]byte(nestedEntry.hash))
+	nestedContent, err := catFile(nestedEntry.hash) // hash is already binary
 	if err != nil {
 		t.Fatalf("error catting nested tree object: %v", err)
 	}
@@ -257,21 +255,18 @@ func TestCatFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating object 1: %v", err)
 	}
-	hash1Encoded := hex.EncodeToString(hash1)
 
 	sampleData2 := []byte("Sample data for cat-file test 2")
 	hash2, err := createObject(sampleData2)
 	if err != nil {
 		t.Fatalf("error creating object 2: %v", err)
 	}
-	hash2Encoded := hex.EncodeToString(hash2)
 
 	sampleData3 := []byte("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.")
 	hash3, err := createObject(sampleData3)
 	if err != nil {
 		t.Fatalf("error creating object 3: %v", err)
 	}
-	hash3Encoded := hex.EncodeToString(hash3)
 
 	// create the index and tree
 	index := map[string][]byte{
@@ -284,10 +279,9 @@ func TestCatFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error building tree object: %v", err)
 	}
-	rootHashEncoded := hex.EncodeToString(rootHash)
 
 	// verify the root tree object using type assertion
-	actualRootObject, err := catFile([]byte(rootHashEncoded))
+	actualRootObject, err := catFile(rootHash) // rootHash is already binary
 	if err != nil {
 		t.Fatalf("error catting root tree object: %v", err)
 	}
@@ -307,14 +301,14 @@ func TestCatFile(t *testing.T) {
 	catfile1Entry, exists := rootEntries["catfile1.txt"]
 	assert.True(t, exists, "catfile1.txt should exist in root tree")
 	assert.Equal(t, "blob", catfile1Entry.objType, "catfile1.txt should be a blob")
-	assert.Equal(t, hash1Encoded, catfile1Entry.hash, "catfile1.txt hash mismatch")
+	assert.Equal(t, hash1, catfile1Entry.hash, "catfile1.txt hash mismatch")
 	assert.Equal(t, fmt.Sprintf("%06o", entryTypeBlob), catfile1Entry.mode, "catfile1.txt mode mismatch")
 
 	// verify catfile2.txt entry
 	catfile2Entry, exists := rootEntries["catfile2.txt"]
 	assert.True(t, exists, "catfile2.txt should exist in root tree")
 	assert.Equal(t, "blob", catfile2Entry.objType, "catfile2.txt should be a blob")
-	assert.Equal(t, hash2Encoded, catfile2Entry.hash, "catfile2.txt hash mismatch")
+	assert.Equal(t, hash2, catfile2Entry.hash, "catfile2.txt hash mismatch")
 	assert.Equal(t, fmt.Sprintf("%06o", entryTypeBlob), catfile2Entry.mode, "catfile2.txt mode mismatch")
 
 	// verify dir entry exists and is a tree
@@ -323,7 +317,7 @@ func TestCatFile(t *testing.T) {
 	assert.Equal(t, "tree", dirEntry.objType, "dir should be a tree")
 
 	// verify dir tree object
-	actualDirObject, err := catFile([]byte(dirEntry.hash))
+	actualDirObject, err := catFile(dirEntry.hash) // hash is already binary
 	if err != nil {
 		t.Fatalf("error catting dir tree object: %v", err)
 	}
@@ -338,6 +332,6 @@ func TestCatFile(t *testing.T) {
 	catfile3Entry := dirTree.entries[0]
 	assert.Equal(t, "catfile3.txt", catfile3Entry.name, "entry name should be catfile3.txt")
 	assert.Equal(t, "blob", catfile3Entry.objType, "catfile3.txt should be a blob")
-	assert.Equal(t, hash3Encoded, catfile3Entry.hash, "catfile3.txt hash mismatch")
+	assert.Equal(t, hash3, catfile3Entry.hash, "catfile3.txt hash mismatch")
 	assert.Equal(t, fmt.Sprintf("%06o", entryTypeBlob), catfile3Entry.mode, "catfile3.txt mode mismatch")
 }

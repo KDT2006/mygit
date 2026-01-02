@@ -141,15 +141,14 @@ func checkoutBranch(branchName string) error {
 func buildIndexFromTree(treeHash []byte, dirPath string, write bool) (map[string][]byte, error) {
 	index := make(map[string][]byte)
 
-	hexHash := fmt.Sprintf("%x", treeHash)
-	obj, err := catFile([]byte(hexHash))
+	obj, err := catFile(treeHash) // treeHash is already binary
 	if err != nil {
 		return nil, err
 	}
 
 	tree, ok := obj.(treeObject)
 	if !ok {
-		return nil, fmt.Errorf("object %s is not a tree", hexHash)
+		return nil, fmt.Errorf("object %x is not a tree", treeHash)
 	}
 
 	for _, entry := range tree.entries {
@@ -158,14 +157,14 @@ func buildIndexFromTree(treeHash []byte, dirPath string, write bool) (map[string
 		switch entry.objType {
 		case "blob":
 			// restore file
-			blobObj, err := catFile([]byte(entry.hash))
+			blobObj, err := catFile(entry.hash) // hash is already binary
 			if err != nil {
 				return nil, err
 			}
 
 			blob, ok := blobObj.(blobObject)
 			if !ok {
-				return nil, fmt.Errorf("object %s is not a blob", entry.hash)
+				return nil, fmt.Errorf("object %x is not a blob", entry.hash)
 			}
 
 			// write to disk if needed
@@ -184,20 +183,10 @@ func buildIndexFromTree(treeHash []byte, dirPath string, write bool) (map[string
 			}
 
 			// add to index
-			hashBytes, err := hex.DecodeString(entry.hash)
-			if err != nil {
-				return nil, fmt.Errorf("error decoding blob hash %s: %v", entry.hash, err)
-			}
-
-			index[entryPath] = hashBytes
+			index[entryPath] = entry.hash // hash is already binary
 		case "tree":
-			// restore sub-tree
-			subTreeHash, err := hex.DecodeString(entry.hash)
-			if err != nil {
-				return nil, fmt.Errorf("error decoding tree hash %s: %v", entry.hash, err)
-			}
-
-			subIndex, err := buildIndexFromTree(subTreeHash, entryPath, write)
+			// restore sub-tree (hash is already binary)
+			subIndex, err := buildIndexFromTree(entry.hash, entryPath, write)
 			if err != nil {
 				return nil, err
 			}
@@ -229,22 +218,18 @@ func removeObsoleteFiles(oldIndex, newIndex map[string][]byte) error {
 // checkoutCommit checks out the working directory to match the state
 // of the given commit hash.
 func checkoutCommit(commitHash []byte) error {
-	hexHash := fmt.Sprintf("%x", commitHash)
-	obj, err := catFile([]byte(hexHash))
+	obj, err := catFile(commitHash) // commitHash is already binary
 	if err != nil {
 		return err
 	}
 
 	commit, ok := obj.(commitObject)
 	if !ok {
-		return fmt.Errorf("object %s is not a commit", hexHash)
+		return fmt.Errorf("object %x is not a commit", commitHash)
 	}
 
-	// retrieve the tree object hash
-	treeHash, err := hex.DecodeString(string(commit.hash))
-	if err != nil {
-		return fmt.Errorf("error decoding tree hash: %v", err)
-	}
+	// retrieve the tree object hash (already binary)
+	treeHash := commit.hash
 
 	// read the old index
 	oldIndex, err := readIndex()
@@ -289,21 +274,18 @@ func checkUncommittedChanges() error {
 		return err
 	}
 
-	hexHash := fmt.Sprintf("%x", treeHash)
-	obj, err := catFile([]byte(hexHash))
+	obj, err := catFile(treeHash) // treeHash is already binary
 	if err != nil {
 		return err
 	}
 
 	commit, ok := obj.(commitObject)
 	if !ok {
-		return fmt.Errorf("object %s is not a commit", hexHash)
+		return fmt.Errorf("object %x is not a commit", treeHash)
 	}
 
-	commitTreeHash, err := hex.DecodeString(string(commit.hash))
-	if err != nil {
-		return fmt.Errorf("error decoding tree hash: %v", err)
-	}
+	// commit.hash is already binary
+	commitTreeHash := commit.hash
 
 	// build index from commit tree without writing files
 	commitIndex, err := buildIndexFromTree(commitTreeHash, "", false)
@@ -347,6 +329,323 @@ func checkUnstagedChanges() error {
 			return fmt.Errorf("file %s has been modified", targetPath)
 		}
 	}
+
+	return nil
+}
+
+// traverseCommitHistory traverses the commit history starting from the given commit
+// and returns a map of commit hashes to their depth in the history.
+func traverseCommitHistory(commit []byte) (map[string]int, error) {
+	history := make(map[string]int)
+
+	current := commit
+	depth := 0
+	for len(current) > 0 {
+		hashStr := fmt.Sprintf("%x", current)
+		history[hashStr] = depth
+		obj, err := catFile(current) // current is already binary
+		if err != nil {
+			return nil, err
+		}
+
+		commitObj, ok := obj.(commitObject)
+		if !ok {
+			return nil, fmt.Errorf("object %s is not a commit", hashStr)
+		}
+
+		if len(commitObj.parents) == 0 {
+			break // no parent
+		}
+
+		current = commitObj.parents[0]
+		depth++
+	}
+
+	return history, nil
+}
+
+// findCommonAncestor finds the most recent common ancestor between two commits.
+func findCommonAncestor(commitA, commitB []byte) ([]byte, error) {
+	historyA, err := traverseCommitHistory(commitA)
+	if err != nil {
+		return nil, err
+	}
+
+	historyB, err := traverseCommitHistory(commitB)
+	if err != nil {
+		return nil, err
+	}
+
+	var mostRecentCommonAncestor []byte
+	mostRecentDepth := -1
+
+	for hashStr := range historyA {
+		if depthB, exists := historyB[hashStr]; exists {
+			if mostRecentDepth == -1 || depthB < mostRecentDepth {
+				mostRecentDepth = depthB
+				ancestorHash, err := hex.DecodeString(hashStr)
+				if err != nil {
+					return nil, fmt.Errorf("error decoding ancestor hash: %v", err)
+				}
+				mostRecentCommonAncestor = ancestorHash
+			}
+		}
+	}
+
+	return mostRecentCommonAncestor, nil
+}
+
+// mergeBranch merges the specified branch into the current branch.
+func mergeBranch(branchName string) error {
+	if err := checkVCSRepo(); err != nil {
+		return err
+	}
+
+	// find commit hash of branch to merge
+	branchRefPath := fmt.Sprintf("refs/heads/%s", branchName)
+	branchCommitHash, err := getRef(branchRefPath)
+	if err != nil {
+		return err
+	}
+
+	if branchCommitHash == nil {
+		return fmt.Errorf("branch %s has no commits", branchName)
+	}
+
+	// find current branch commit hash
+	currentBranch, err := getCurrentBranch()
+	if err != nil {
+		return err
+	}
+
+	currentBranchRefPath := fmt.Sprintf("refs/heads/%s", currentBranch)
+	currentCommitHash, err := getRef(currentBranchRefPath)
+	if err != nil {
+		return err
+	}
+
+	if currentCommitHash == nil {
+		return fmt.Errorf("current branch %s has no commits", currentBranch)
+	}
+
+	// find common ancestor
+	baseHash, err := findCommonAncestor(currentCommitHash, branchCommitHash)
+	if err != nil {
+		return err
+	}
+
+	// check for fast-forward possibility
+	if slices.Equal(baseHash, currentCommitHash) {
+		// fast-forward (A is ancestor of B)
+		if err := checkoutCommit(branchCommitHash); err != nil {
+			return err
+		}
+
+		// update current branch (A) to point to B
+		if err := updateRef(currentBranchRefPath, branchCommitHash); err != nil {
+			return err
+		}
+
+		fmt.Printf("Fast-forwarded to branch %s and commit %x\n", branchName, branchCommitHash)
+
+		return nil
+	} else if slices.Equal(baseHash, branchCommitHash) {
+		// already up to date (B is ancestor of A)
+		fmt.Println("Already up to date")
+		return nil
+	}
+
+	// three-way merge required
+	// get trees for base, current, and branch commits
+	baseObj, err := catFile(baseHash)
+	if err != nil {
+		return err
+	}
+	baseCommit, ok := baseObj.(commitObject)
+	if !ok {
+		return fmt.Errorf("object %x is not a commit", baseHash)
+	}
+
+	currentObj, err := catFile(currentCommitHash)
+	if err != nil {
+		return err
+	}
+	currentCommit, ok := currentObj.(commitObject)
+	if !ok {
+		return fmt.Errorf("object %x is not a commit", currentCommitHash)
+	}
+
+	branchObj, err := catFile(branchCommitHash)
+	if err != nil {
+		return err
+	}
+	branchCommit, ok := branchObj.(commitObject)
+	if !ok {
+		return fmt.Errorf("object %x is not a commit", branchCommitHash)
+	}
+
+	// build indexes for the three commits
+	baseIndex, err := buildIndexFromTree(baseCommit.hash, "", false)
+	if err != nil {
+		return err
+	}
+
+	currentIndex, err := buildIndexFromTree(currentCommit.hash, "", false)
+	if err != nil {
+		return err
+	}
+
+	branchIndex, err := buildIndexFromTree(branchCommit.hash, "", false)
+	if err != nil {
+		return err
+	}
+
+	// collect all unique file paths
+	uniquePaths := make(map[string]struct{})
+	for path := range baseIndex {
+		uniquePaths[path] = struct{}{}
+	}
+
+	for path := range currentIndex {
+		uniquePaths[path] = struct{}{}
+	}
+
+	for path := range branchIndex {
+		uniquePaths[path] = struct{}{}
+	}
+
+	// perform a three-way merge
+	mergedIndex := make(map[string][]byte)
+	for path := range uniquePaths {
+		baseHash, inBase := baseIndex[path]
+		currentHash, inCurrent := currentIndex[path]
+		branchHash, inBranch := branchIndex[path]
+
+		switch {
+		case !inBase && inCurrent && !inBranch:
+			// added in current only
+			mergedIndex[path] = currentHash
+
+		case !inBase && !inCurrent && inBranch:
+			// added in branch only
+			mergedIndex[path] = branchHash
+
+		case !inBase && inCurrent && inBranch:
+			// added in both so check for conflicts
+			if slices.Equal(currentHash, branchHash) {
+				mergedIndex[path] = currentHash
+			} else {
+				return fmt.Errorf("merge conflict on file %s", path)
+			}
+
+		case inBase && !inCurrent && !inBranch:
+			// deleted in both
+
+		case inBase && inCurrent && !inBranch:
+			// deleted in branch
+			if slices.Equal(baseHash, currentHash) {
+				// unchanged in current, so delete
+			} else {
+				// chenged in current and deleted in branch so conflict
+				return fmt.Errorf("merge conflict on file %s", path)
+			}
+
+		case inBase && !inCurrent && inBranch:
+			// deleted in current
+			if slices.Equal(baseHash, branchHash) {
+				// unchanged in branch, so delete
+			} else {
+				// changed in branch and deleted in current so conflict
+				return fmt.Errorf("merge conflict on file %s", path)
+			}
+
+		case inBase && inCurrent && inBranch:
+			// present in all three
+			baseCurrentEq := slices.Equal(baseHash, currentHash)
+			baseBranchEq := slices.Equal(baseHash, branchHash)
+			currentBranchEq := slices.Equal(currentHash, branchHash)
+
+			switch {
+			case baseCurrentEq && baseBranchEq:
+				// unchanged in both
+				mergedIndex[path] = baseHash
+
+			case baseCurrentEq && !baseBranchEq:
+				// changed in branch only
+				mergedIndex[path] = branchHash
+
+			case !baseCurrentEq && baseBranchEq:
+				// changed in current only
+				mergedIndex[path] = currentHash
+
+			case currentBranchEq:
+				// changed in both to same value
+				mergedIndex[path] = currentHash
+
+			default:
+				// changed in both to different values so conflict
+				return fmt.Errorf("merge conflict on file %s", path)
+			}
+		}
+	}
+
+	// write merged index to working directory
+	for path, hash := range mergedIndex {
+		obj, err := catFile(hash)
+		if err != nil {
+			return err
+		}
+
+		blob, ok := obj.(blobObject)
+		if !ok {
+			return fmt.Errorf("object %x is not a blob", hash)
+		}
+
+		// create parent directories if needed
+		if dir := filepath.Dir(path); dir != "." {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return fmt.Errorf("error creating directory %s: %v", dir, err)
+			}
+		}
+
+		// write file content
+		if err := os.WriteFile(path, blob.content, 0644); err != nil {
+			return fmt.Errorf("error writing file %s: %v", path, err)
+		}
+
+	}
+
+	// update index file
+	if err := writeIndex(mergedIndex); err != nil {
+		return err
+	}
+
+	// remove obsolete files from working directory
+	if err := removeObsoleteFiles(currentIndex, mergedIndex); err != nil {
+		return err
+	}
+
+	// build the tree object and make a merge commit
+	treeHash, err := buildTreeObject(mergedIndex)
+	if err != nil {
+		return err
+	}
+
+	commitHash, err := writeCommitObject(
+		treeHash,
+		[][]byte{currentCommitHash, branchCommitHash},
+		fmt.Sprintf("Merge branch '%s' into %s", branchName, currentBranch),
+	)
+	if err != nil {
+		return err
+	}
+
+	// update current branch to point to new merge commit
+	if err := updateRef(currentBranchRefPath, commitHash); err != nil {
+		return err
+	}
+
+	fmt.Printf("Merged %s into %s, commit %x\n", branchName, currentBranch, commitHash)
 
 	return nil
 }

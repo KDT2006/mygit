@@ -37,7 +37,7 @@ func (b blobObject) String() string {
 type treeEntry struct {
 	mode    string
 	objType string
-	hash    string
+	hash    []byte // 20-byte binary hash
 	name    string
 }
 
@@ -50,15 +50,15 @@ type treeObject struct {
 func (t treeObject) String() string {
 	var sb strings.Builder
 	for _, entry := range t.entries {
-		sb.WriteString(fmt.Sprintf("%s %s %s\t%s\n", entry.mode, entry.objType, entry.hash, entry.name))
+		sb.WriteString(fmt.Sprintf("%s %s %x\t%s\n", entry.mode, entry.objType, entry.hash, entry.name))
 	}
 	return sb.String()
 }
 
 // commitObject represents a commit object.
 type commitObject struct {
-	hash      []byte // tree hash (hex string as bytes)
-	parent    []byte // parent commit hash (binary)
+	hash      []byte   // tree hash (20-byte binary)
+	parents   [][]byte // parent commit hashes (20-byte binary)
 	author    string
 	committer string
 	message   string
@@ -67,9 +67,11 @@ type commitObject struct {
 // String returns the string representation of the commit object.
 func (c commitObject) String() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("tree %s\n", string(c.hash)))
-	if len(c.parent) > 0 {
-		sb.WriteString(fmt.Sprintf("parent %x\n", c.parent))
+	sb.WriteString(fmt.Sprintf("tree %x\n", c.hash))
+	if len(c.parents) > 0 {
+		for _, parent := range c.parents {
+			sb.WriteString(fmt.Sprintf("parent %x\n", parent))
+		}
 	}
 	sb.WriteString(fmt.Sprintf("author %s\n", c.author))
 	sb.WriteString(fmt.Sprintf("committer %s\n", c.committer))
@@ -201,16 +203,11 @@ func writeTreeObject(entries []treeEntry) ([]byte, error) {
 	var buf bytes.Buffer
 	for _, entry := range entries {
 		// format: "<mode> <name>\0<20-byte hash>"
-		hashBytes, err := hex.DecodeString(entry.hash)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding hash for entry %s: %v", entry.name, err)
-		}
-
 		buf.WriteString(entry.mode)
 		buf.WriteByte(' ')
 		buf.WriteString(entry.name)
 		buf.WriteByte(0)
-		buf.Write(hashBytes)
+		buf.Write(entry.hash) // hash is already binary
 	}
 
 	// create tree header
@@ -281,7 +278,7 @@ func buildTreeRecursive(index map[string][]byte, prefix string) ([]byte, error) 
 			entries = append(entries, treeEntry{
 				mode:    fmt.Sprintf("%06o", entryTypeBlob),
 				objType: "blob",
-				hash:    hex.EncodeToString(hash),
+				hash:    hash, // hash is already binary
 				name:    parts[0],
 			})
 		} else {
@@ -304,7 +301,7 @@ func buildTreeRecursive(index map[string][]byte, prefix string) ([]byte, error) 
 		entries = append(entries, treeEntry{
 			mode:    fmt.Sprintf("%06o", entryTypeTree),
 			objType: "tree",
-			hash:    hex.EncodeToString(subTreeHash),
+			hash:    subTreeHash, // hash is already binary
 			name:    subdir,
 		})
 	}
@@ -313,7 +310,7 @@ func buildTreeRecursive(index map[string][]byte, prefix string) ([]byte, error) 
 }
 
 // writeCommitObject creates a commit object and returns its hash.
-func writeCommitObject(treeHash, parentHash []byte, message string) ([]byte, error) {
+func writeCommitObject(treeHash []byte, parentHashes [][]byte, message string) ([]byte, error) {
 	if err := checkVCSRepo(); err != nil {
 		return nil, err
 	}
@@ -323,7 +320,7 @@ func writeCommitObject(treeHash, parentHash []byte, message string) ([]byte, err
 
 	buf.WriteString(fmt.Sprintf("tree %x\n", treeHash))
 
-	if parentHash != nil {
+	for _, parentHash := range parentHashes {
 		buf.WriteString(fmt.Sprintf("parent %x\n", parentHash))
 	}
 
@@ -379,8 +376,8 @@ func catFile(fileHash []byte) (object, error) {
 		return nil, err
 	}
 
-	// fileHash is expected to be hex string as bytes
-	hashStr := string(fileHash)
+	// convert binary hash to hex string for file path
+	hashStr := fmt.Sprintf("%x", fileHash)
 
 	// build file path
 	filePath := fmt.Sprintf(".%s/objects/%s/%s", vcsName, hashStr[:2], hashStr[2:])
@@ -492,7 +489,7 @@ func parseTreeObject(data []byte) (treeObject, error) {
 		entry := treeEntry{
 			mode:    fmt.Sprintf("%06o", mode),
 			objType: objectType,
-			hash:    hex.EncodeToString(hash),
+			hash:    hash, // store as binary (already 20 bytes)
 			name:    name,
 		}
 		obj.entries = append(obj.entries, entry)
@@ -515,7 +512,12 @@ func parseCommitObject(data []byte) (commitObject, error) {
 	lines := strings.Split(target, "\n")
 	for _, line := range lines {
 		if strings.HasPrefix(line, "tree ") {
-			object.hash = []byte(strings.TrimPrefix(line, "tree "))
+			treeHex := strings.TrimPrefix(line, "tree ")
+			treeHash, err := hex.DecodeString(treeHex)
+			if err != nil {
+				return commitObject{}, fmt.Errorf("error decoding tree hash in commit object: %v", err)
+			}
+			object.hash = treeHash
 			continue
 		}
 
@@ -525,7 +527,7 @@ func parseCommitObject(data []byte) (commitObject, error) {
 			if err != nil {
 				return commitObject{}, fmt.Errorf("error decoding parent hash in commit object: %v", err)
 			}
-			object.parent = parentHash
+			object.parents = append(object.parents, parentHash)
 			continue
 		}
 
@@ -551,34 +553,31 @@ func parseCommitObject(data []byte) (commitObject, error) {
 
 // printCommitHistory prints the commit history starting from the given commit hash.
 func printCommitHistory(commitHash []byte) error {
-	if commitHash == nil {
+	if len(commitHash) == 0 {
 		return nil // base case: no more commits
 	}
 
-	// convert binary hash to hex string for catFile
-	hexHash := fmt.Sprintf("%x", commitHash)
-
-	// read the commit object
-	obj, err := catFile([]byte(hexHash))
+	// read the commit object (commitHash is already binary)
+	obj, err := catFile(commitHash)
 	if err != nil {
-		return fmt.Errorf("error reading commit object %s: %v", hexHash, err)
+		return fmt.Errorf("error reading commit object %x: %v", commitHash, err)
 	}
 
 	commitObj, ok := obj.(commitObject)
 	if !ok {
-		return fmt.Errorf("error object %s is not a commit object", hexHash)
+		return fmt.Errorf("error object %x is not a commit object", commitHash)
 	}
 
 	// print commit details
-	fmt.Printf("commit %s\n", hexHash)
+	fmt.Printf("commit %x\n", commitHash)
 	fmt.Printf("Author: %s\n", commitObj.author)
 	fmt.Printf("Committer: %s\n\n", commitObj.committer)
 	fmt.Printf("    %s\n\n", commitObj.message)
 
 	// recursive call to print parent commit
-	if len(commitObj.parent) == 0 {
+	if len(commitObj.parents) == 0 {
 		return nil
 	}
 
-	return printCommitHistory(commitObj.parent)
+	return printCommitHistory(commitObj.parents[0])
 }
