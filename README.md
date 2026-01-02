@@ -8,7 +8,7 @@ mygit is a small, educational re-implementation of core Git concepts written in 
 - Blob/tree/commit objects with minimal, readable formats
 - Lightweight index that maps file paths to blob hashes
 - Basic refs in `.mygit/refs/heads/` and `HEAD`
-- Core commands: `init`, `hash-object`, `add`, `rm`, `write-tree`, `cat-file`, `commit`, `log`, `branch`, `checkout`
+- Core commands: `init`, `hash-object`, `add`, `rm`, `write-tree`, `cat-file`, `commit`, `log`, `branch`, `checkout`, `merge`
 
 ## Quick Start
 
@@ -55,6 +55,16 @@ Branches and checkout:
 ./mygit checkout feature-x
 ```
 
+Merging (fast-forward or conflict-free 3-way):
+
+```bash
+# From main, merge feature-x into the current branch
+./mygit merge feature-x
+
+# If a fast-forward is possible, HEAD just moves forward.
+# Otherwise, a simple 3-way merge is performed; conflicts cause the merge to abort.
+```
+
 Inspect objects:
 
 ```bash
@@ -72,7 +82,7 @@ On Windows, replace `./mygit` with `mygit.exe`. You can also use `go run . <comm
 - Objects
 	- Blob: raw file content; header `blob <size>\0` + bytes, stored compressed.
 	- Tree: lists entries with mode, name, and the 20-byte object ID they point to.
-	- Commit: references a tree and an optional parent, plus author/committer/message.
+	- Commit: references a tree and one or more parents (for merge commits), plus author/committer/message.
 - Hashing & Storage
 	- SHA‑1 of the header+content determines the object ID.
 	- Stored under `.mygit/objects/aa/bb…` (first byte as directory, remainder as file).
@@ -92,16 +102,17 @@ add <path>                Stage a file or directory recursively into the index
 rm [--cached] <path>      Remove a file from index and disk (--cached: index only)
 write-tree                Build a tree object from the index and print its hash
 cat-file <hash>           Pretty-print an object (blob/tree/commit)
-commit <message>          Create a commit from the current tree (and parent)
+commit <message>          Create a commit from the current tree (and parent/s)
 log                       Print commit history from current HEAD
 branch [<name>]           List branches or create a new one at HEAD
 checkout <branch>         Switch to a branch and restore the working tree
+merge <branch>            Merge the given branch into current (fast-forward or conflict-free 3-way)
 ```
 
 ## Design Goals & Limitations
 
 - Educational clarity over completeness and performance
-- No networking/remotes, merges, staging metadata, or conflict resolution
+- No networking/remotes, advanced merge strategies, or automatic conflict resolution (merges abort on conflicts)
 - Detached `HEAD` is not supported
 
 ## Project Structure
@@ -109,7 +120,7 @@ checkout <branch>         Switch to a branch and restore the working tree
 - `main.go` — CLI entry and command routing
 - `object.go` — object formats, hashing, read/write utilities
 - `index.go` — index read/write and directory staging
-- `refs.go` — refs, branch/checkout, and working tree restore
+- `refs.go` — refs, branch/checkout/merge, and working tree restore
 
 ## Testing
 
