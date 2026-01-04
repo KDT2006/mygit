@@ -55,14 +55,24 @@ Branches and checkout:
 ./mygit checkout feature-x
 ```
 
-Merging (fast-forward or conflict-free 3-way):
+Merging (fast-forward or 3-way, with conflicts):
 
 ```bash
 # From main, merge feature-x into the current branch
 ./mygit merge feature-x
 
 # If a fast-forward is possible, HEAD just moves forward.
-# Otherwise, a simple 3-way merge is performed; conflicts cause the merge to abort.
+# Otherwise, a simple 3-way merge is performed.
+#
+# If conflicts occur, mygit:
+# - writes conflict markers (<<<<<<<, =======, >>>>>>>) into the affected files
+# - records merge state in .mygit/MERGE_HEAD and .mygit/MERGE_CONFLICTS
+# - stops without creating a merge commit
+#
+# To finish a conflicted merge:
+# 1) Edit the files to resolve conflicts (or delete files if that is the resolution)
+# 2) Stage the resolution with ./mygit add <path> (or ./mygit rm <path>)
+# 3) Run ./mygit commit "Merge ..." to create the merge commit
 ```
 
 Inspect objects:
@@ -106,13 +116,13 @@ commit <message>          Create a commit from the current tree (and parent/s)
 log                       Print commit history from current HEAD
 branch [<name>]           List branches or create a new one at HEAD
 checkout <branch>         Switch to a branch and restore the working tree
-merge <branch>            Merge the given branch into current (fast-forward or conflict-free 3-way)
+merge <branch>            Merge the given branch into current (fast-forward or 3-way; conflicts pause for manual resolution)
 ```
 
 ## Design Goals & Limitations
 
 - Educational clarity over completeness and performance
-- No networking/remotes, advanced merge strategies, or automatic conflict resolution (merges abort on conflicts)
+- No networking/remotes, advanced merge strategies, or automatic conflict resolution (conflicts are left for the user to resolve)
 - Detached `HEAD` is not supported
 
 ## Project Structure

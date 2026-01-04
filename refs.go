@@ -11,6 +11,16 @@ import (
 	"strings"
 )
 
+// Conflict represents a merge conflict for a file between two branches.
+type Conflict struct {
+	BaseHash     []byte
+	OurHash      []byte
+	TheirHash    []byte
+	OurContent   []byte
+	TheirContent []byte
+	BranchName   string
+}
+
 // getHEAD reads the HEAD file to get the current branch reference.
 func getHEAD() (string, error) {
 	if err := checkVCSRepo(); err != nil {
@@ -516,6 +526,7 @@ func mergeBranch(branchName string) error {
 
 	// perform a three-way merge
 	mergedIndex := make(map[string][]byte)
+	conflicts := make(map[string]Conflict)
 	for path := range uniquePaths {
 		baseHash, inBase := baseIndex[path]
 		currentHash, inCurrent := currentIndex[path]
@@ -535,7 +546,33 @@ func mergeBranch(branchName string) error {
 			if slices.Equal(currentHash, branchHash) {
 				mergedIndex[path] = currentHash
 			} else {
-				return fmt.Errorf("merge conflict on file %s", path)
+				ourContent, err := catFile(currentHash)
+				if err != nil {
+					return err
+				}
+				ourContentBlob, ok := ourContent.(blobObject)
+				if !ok {
+					return fmt.Errorf("object %x is not a blob", currentHash)
+				}
+
+				theirContent, err := catFile(branchHash)
+				if err != nil {
+					return err
+				}
+				theirContentBlob, ok := theirContent.(blobObject)
+				if !ok {
+					return fmt.Errorf("object %x is not a blob", branchHash)
+				}
+
+				// add to conflicts map to write markers
+				conflicts[path] = Conflict{
+					BaseHash:     baseHash,
+					OurHash:      currentHash,
+					TheirHash:    branchHash,
+					OurContent:   ourContentBlob.content,
+					TheirContent: theirContentBlob.content,
+					BranchName:   branchName,
+				}
 			}
 
 		case inBase && !inCurrent && !inBranch:
@@ -546,8 +583,25 @@ func mergeBranch(branchName string) error {
 			if slices.Equal(baseHash, currentHash) {
 				// unchanged in current, so delete
 			} else {
-				// chenged in current and deleted in branch so conflict
-				return fmt.Errorf("merge conflict on file %s", path)
+				// changed in current and deleted in branch so conflict
+				ourContent, err := catFile(currentHash)
+				if err != nil {
+					return err
+				}
+				ourContentBlob, ok := ourContent.(blobObject)
+				if !ok {
+					return fmt.Errorf("object %x is not a blob", currentHash)
+				}
+
+				// add to conflicts map to write markers
+				conflicts[path] = Conflict{
+					BaseHash:     baseHash,
+					OurHash:      currentHash,
+					TheirHash:    branchHash,
+					OurContent:   ourContentBlob.content,
+					TheirContent: []byte{},
+					BranchName:   branchName,
+				}
 			}
 
 		case inBase && !inCurrent && inBranch:
@@ -556,7 +610,24 @@ func mergeBranch(branchName string) error {
 				// unchanged in branch, so delete
 			} else {
 				// changed in branch and deleted in current so conflict
-				return fmt.Errorf("merge conflict on file %s", path)
+				theirContent, err := catFile(branchHash)
+				if err != nil {
+					return err
+				}
+				theirContentBlob, ok := theirContent.(blobObject)
+				if !ok {
+					return fmt.Errorf("object %x is not a blob", branchHash)
+				}
+
+				// add to conflicts map to write markers
+				conflicts[path] = Conflict{
+					BaseHash:     baseHash,
+					OurHash:      currentHash,
+					TheirHash:    branchHash,
+					OurContent:   []byte{},
+					TheirContent: theirContentBlob.content,
+					BranchName:   branchName,
+				}
 			}
 
 		case inBase && inCurrent && inBranch:
@@ -584,7 +655,33 @@ func mergeBranch(branchName string) error {
 
 			default:
 				// changed in both to different values so conflict
-				return fmt.Errorf("merge conflict on file %s", path)
+				ourContent, err := catFile(currentHash)
+				if err != nil {
+					return err
+				}
+				ourContentBlob, ok := ourContent.(blobObject)
+				if !ok {
+					return fmt.Errorf("object %x is not a blob", currentHash)
+				}
+
+				theirContent, err := catFile(branchHash)
+				if err != nil {
+					return err
+				}
+				theirContentBlob, ok := theirContent.(blobObject)
+				if !ok {
+					return fmt.Errorf("object %x is not a blob", branchHash)
+				}
+
+				// add to conflicts map to write markers
+				conflicts[path] = Conflict{
+					BaseHash:     baseHash,
+					OurHash:      currentHash,
+					TheirHash:    branchHash,
+					OurContent:   ourContentBlob.content,
+					TheirContent: theirContentBlob.content,
+					BranchName:   branchName,
+				}
 			}
 		}
 	}
@@ -625,6 +722,39 @@ func mergeBranch(branchName string) error {
 		return err
 	}
 
+	// write conflict markers
+	for path, conflict := range conflicts {
+		if err := writeConflictMarkers(path, conflict); err != nil {
+			return err
+		}
+	}
+
+	// report if conflicts exist
+	if len(conflicts) > 0 {
+		// write to MERGE_HEAD to indicate conflict state
+		mergeHeadPath := fmt.Sprintf(".%s/MERGE_HEAD", vcsName)
+		if err := os.WriteFile(mergeHeadPath, []byte(fmt.Sprintf("%x", branchCommitHash)), 0644); err != nil {
+			return fmt.Errorf("error writing MERGE_HEAD: %v", err)
+		}
+
+		// write conflicted paths to MERGE_CONFLICTS
+		mergeConflictsPath := fmt.Sprintf(".%s/MERGE_CONFLICTS", vcsName)
+		var conflictPaths []string
+		for path := range conflicts {
+			conflictPaths = append(conflictPaths, path)
+		}
+		if err := os.WriteFile(mergeConflictsPath, []byte(strings.Join(conflictPaths, "\n")), 0644); err != nil {
+			return fmt.Errorf("error writing MERGE_CONFLICTS: %v", err)
+		}
+
+		fmt.Printf("Automatic merge failed; fix conflicts and then commit.\n")
+		for path := range conflicts {
+			fmt.Printf("Conflict in file: %s\n", path)
+		}
+
+		return nil
+	}
+
 	// build the tree object and make a merge commit
 	treeHash, err := buildTreeObject(mergedIndex)
 	if err != nil {
@@ -648,4 +778,70 @@ func mergeBranch(branchName string) error {
 	fmt.Printf("Merged %s into %s, commit %x\n", branchName, currentBranch, commitHash)
 
 	return nil
+}
+
+// writeConflictMarkers writes conflict markers to the specified file path
+func writeConflictMarkers(path string, conflict Conflict) error {
+	content := []byte{}
+	content = append(content, []byte("<<<<<<< HEAD\n")...)
+	content = append(content, conflict.OurContent...)
+	content = append(content, []byte("=======\n")...)
+	content = append(content, conflict.TheirContent...)
+	content = append(content, []byte(fmt.Sprintf(">>>>>>> %s\n", conflict.BranchName))...)
+
+	return os.WriteFile(path, content, 0644)
+}
+
+// hasMergeConflicts checks if there are any merge conflicts present
+func isMergeInProgress() (bool, error) {
+	mergeHeadPath := fmt.Sprintf(".%s/MERGE_HEAD", vcsName)
+	_, err := os.Stat(mergeHeadPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("error checking %s: %v", mergeHeadPath, err)
+	}
+
+	return true, nil
+}
+
+// isConflictsResolved checks if all merge conflicts have been resolved
+func isConflictsResolved(index map[string][]byte) (bool, error) {
+	mergeConflictsPath := fmt.Sprintf(".%s/MERGE_CONFLICTS", vcsName)
+	content, err := os.ReadFile(mergeConflictsPath)
+	if err != nil {
+		return false, err
+	}
+
+	if string(content) == "" {
+		return true, nil // no conflicts
+	}
+
+	paths := strings.Split(strings.TrimSpace(string(content)), "\n")
+	for _, path := range paths {
+		hash, ok := index[path]
+		if !ok {
+			// check if file was deleted
+			_, err := os.Stat(path)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue // file deleted, so resolved
+			}
+
+			return false, nil // still in conflict
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return false, err
+		}
+
+		contentHash := hashObject(content)
+
+		if !slices.Equal(hash, contentHash) {
+			return false, nil // still in conflict
+		}
+	}
+
+	return true, nil
 }

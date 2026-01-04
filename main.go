@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 )
 
 const (
@@ -200,6 +201,23 @@ func handleCommit() {
 		log.Fatal(err)
 	}
 
+	// check if merge conflicts exist
+	hasConflicts, err := isMergeInProgress()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if hasConflicts {
+		conflictsResolved, err := isConflictsResolved(index)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if !conflictsResolved {
+			log.Fatal("cannot commit: merge conflicts exist, please resolve them first")
+		}
+	}
+
 	// build the tree structure and write to disk
 	treeHash, err := buildTreeObject(index)
 	if err != nil {
@@ -217,8 +235,26 @@ func handleCommit() {
 		log.Fatal(err)
 	}
 
+	commitParents := [][]byte{refHash}
+
 	// create commit object
-	commitHash, err := writeCommitObject(treeHash, [][]byte{refHash}, message)
+	if hasConflicts {
+		mergeHead, err := os.ReadFile(fmt.Sprintf(".%s/MERGE_HEAD", vcsName))
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		mergeHeadBinary, err := hex.DecodeString(strings.TrimSpace(string(mergeHead)))
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		commitParents = append(commitParents, mergeHeadBinary)
+
+		fmt.Println("All conflicts resolved. Creating merge commit.")
+	}
+
+	commitHash, err := writeCommitObject(treeHash, commitParents, message)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -227,6 +263,20 @@ func handleCommit() {
 	err = updateRef(head, commitHash)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	if hasConflicts {
+		// delete merge state files
+		files := []string{
+			fmt.Sprintf(".%s/MERGE_HEAD", vcsName),
+			fmt.Sprintf(".%s/MERGE_CONFLICTS", vcsName),
+		}
+
+		for _, file := range files {
+			if err := os.Remove(file); err != nil {
+				log.Fatal(err)
+			}
+		}
 	}
 
 	fmt.Printf("%x\n", commitHash)
@@ -437,6 +487,13 @@ func handleMerge() {
 	// check for unstaged changes
 	if err := checkUnstagedChanges(); err != nil {
 		log.Fatal("please stage your changes before merging branches")
+	}
+
+	// check for existing merge in progress
+	if yes, err := isMergeInProgress(); err != nil {
+		log.Fatal(err)
+	} else if yes {
+		log.Fatal("merge in progress; please resolve conflicts and commit before merging again")
 	}
 
 	// merge the specified branch into the current branch
