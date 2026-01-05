@@ -32,15 +32,18 @@ func readIndex() (map[string][]byte, error) {
 	for scanner.Scan() {
 		parts := strings.Split(scanner.Text(), "|")
 		if len(parts) != 2 {
-			continue
+			return nil, fmt.Errorf("invalid index entry: %s", scanner.Text())
 		}
 
 		filepath := parts[0]
+		if filepath == "" {
+			return nil, fmt.Errorf("empty filepath in index entry: %s", scanner.Text())
+		}
 
 		// decode hex string to byte slice
 		hash, err := hex.DecodeString(parts[1])
 		if err != nil {
-			continue
+			return nil, err
 		}
 
 		index[filepath] = hash

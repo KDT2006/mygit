@@ -104,21 +104,27 @@ func createDirectoriesFiles() error {
 
 	// index file
 	indexPath := fmt.Sprintf(".%s/index", vcsName)
-	if _, err := os.Create(indexPath); err != nil {
+	f, err := os.Create(indexPath)
+	if err != nil {
 		return fmt.Errorf("error creating index file: %v", err)
 	}
+	f.Close()
 
 	// config file
 	configPath := fmt.Sprintf(".%s/config", vcsName)
-	if _, err := os.Create(configPath); err != nil {
+	f, err = os.Create(configPath)
+	if err != nil {
 		return fmt.Errorf("error creating config file: %v", err)
 	}
+	f.Close()
 
 	// main branch ref file (empty initially)
 	mainRefPath := fmt.Sprintf(".%s/refs/heads/main", vcsName)
-	if _, err := os.Create(mainRefPath); err != nil {
+	f, err = os.Create(mainRefPath)
+	if err != nil {
 		return fmt.Errorf("error creating main ref file: %v", err)
 	}
+	f.Close()
 
 	return nil
 }

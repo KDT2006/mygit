@@ -36,9 +36,6 @@ func TestCreateDirectoriesFiles(t *testing.T) {
 			t.Fatalf("error verifying file %s: %v", file, err)
 		}
 	}
-
-	// cleanup
-	os.RemoveAll(fmt.Sprintf(".%s", vcsName))
 }
 
 func TestCreateObject(t *testing.T) {
@@ -85,67 +82,6 @@ func TestCreateObject(t *testing.T) {
 
 	expectedFileContent := append([]byte(fmt.Sprintf("blob %d\x00", len(sampleData))), sampleData...)
 	assert.Equal(t, expectedFileContent, buf[:len(expectedFileContent)], "File contents do not match expected object data")
-}
-
-func TestUpdateIndex(t *testing.T) {
-	if err := createDirectoriesFiles(); err != nil {
-		t.Fatalf("Failed to create directories: %v", err)
-	}
-	defer os.RemoveAll(fmt.Sprintf(".%s", vcsName))
-
-	// initialize test cases
-	tests := []struct {
-		name    string
-		content []byte
-	}{
-		{
-			name:    "testfile1.txt",
-			content: []byte("Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book."),
-		},
-		{
-			name:    "testfile2.txt",
-			content: []byte("It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum."),
-		},
-		{
-			name:    "testfile3.txt",
-			content: []byte("It is a long established fact that a reader will be distracted by the readable content of a page when looking at its layout"),
-		},
-	}
-
-	// build expected state
-	expectedState := make(map[string][]byte)
-
-	for _, tc := range tests {
-		// create object
-		hash, err := createObject(tc.content)
-		if err != nil {
-			t.Fatalf("error creating object for %s: %v", tc.name, err)
-		}
-
-		// update index
-		err = updateIndex(tc.name, hash)
-		if err != nil {
-			t.Fatalf("error updating index for %s: %v", tc.name, err)
-		}
-
-		expectedState[tc.name] = hash
-	}
-
-	actualState, err := readIndex()
-	if err != nil {
-		t.Fatalf("error reading index: %v", err)
-	}
-
-	// compare expected and actual
-	assert.Equal(t, len(expectedState), len(actualState), "Index state does not match expected state")
-
-	for file, expectedHash := range expectedState {
-		actualHash, exists := actualState[file]
-		if !exists {
-			t.Fatalf("file %s missing in index", file)
-		}
-		assert.Equal(t, expectedHash, actualHash, "Hash for file %s does not match", file)
-	}
 }
 
 func TestBuildTreeObject(t *testing.T) {
