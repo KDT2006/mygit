@@ -21,6 +21,9 @@ type Conflict struct {
 	BranchName   string
 }
 
+// readBlobFunc is a function type for reading blob content given its hash.
+type readBlobFunc func([]byte) ([]byte, error)
+
 // getHEAD reads the HEAD file to get the current branch reference.
 func getHEAD() (string, error) {
 	if err := checkVCSRepo(); err != nil {
@@ -405,6 +408,190 @@ func findCommonAncestor(commitA, commitB []byte) ([]byte, error) {
 	return mostRecentCommonAncestor, nil
 }
 
+// readBlobFromCatFile reads a blob object using catFile and returns its content.
+// This is used as a pass-in function for calculateMerge for readBlobFunc type.
+func readBlobFromCatFile(hash []byte) ([]byte, error) {
+	obj, err := catFile(hash)
+	if err != nil {
+		return nil, err
+	}
+
+	blobObj, ok := obj.(blobObject)
+	if !ok {
+		return nil, fmt.Errorf("object %x is not a blob", hash)
+	}
+
+	return blobObj.content, nil
+}
+
+// calculateMergeWithReadBlob is a wrapper around calculateMerge that uses readBlobFromCatFile.
+func calculateMergeWithReadBlob(base, ours, theirs map[string][]byte, branchName string) (map[string][]byte, map[string]Conflict, error) {
+	return calculateMerge(base, ours, theirs, branchName, readBlobFromCatFile)
+}
+
+// calculateMerge performs a three-way merge between base, ours, and theirs indexes
+func calculateMerge(
+	base, ours, theirs map[string][]byte, branchName string, readBlob readBlobFunc,
+) (map[string][]byte, map[string]Conflict, error) {
+	if readBlob == nil {
+		return nil, nil, fmt.Errorf("readBlob function cannot be nil")
+	}
+
+	// collect all unique file paths
+	uniquePaths := make(map[string]struct{})
+	for path := range base {
+		uniquePaths[path] = struct{}{}
+	}
+
+	for path := range ours {
+		uniquePaths[path] = struct{}{}
+	}
+
+	for path := range theirs {
+		uniquePaths[path] = struct{}{}
+	}
+
+	// perform a three-way merge
+	mergedIndex := make(map[string][]byte)
+	conflicts := make(map[string]Conflict)
+	for path := range uniquePaths {
+		baseHash, inBase := base[path]
+		currentHash, inCurrent := ours[path]
+		branchHash, inBranch := theirs[path]
+
+		switch {
+		case !inBase && inCurrent && !inBranch:
+			// added in current only
+			mergedIndex[path] = currentHash
+
+		case !inBase && !inCurrent && inBranch:
+			// added in branch only
+			mergedIndex[path] = branchHash
+
+		case !inBase && inCurrent && inBranch:
+			// added in both so check for conflicts
+			if slices.Equal(currentHash, branchHash) {
+				mergedIndex[path] = currentHash
+			} else {
+				ourContentBlob, err := readBlob(currentHash)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				theirContentBlob, err := readBlob(branchHash)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				// add to conflicts map to write markers
+				conflicts[path] = Conflict{
+					BaseHash:     baseHash,
+					OurHash:      currentHash,
+					TheirHash:    branchHash,
+					OurContent:   ourContentBlob,
+					TheirContent: theirContentBlob,
+					BranchName:   branchName,
+				}
+			}
+
+		case inBase && !inCurrent && !inBranch:
+			// deleted in both
+
+		case inBase && inCurrent && !inBranch:
+			// deleted in branch
+			if slices.Equal(baseHash, currentHash) {
+				// unchanged in current, so delete
+			} else {
+				// changed in current and deleted in branch so conflict
+				ourContentBlob, err := readBlob(currentHash)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				// add to conflicts map to write markers
+				conflicts[path] = Conflict{
+					BaseHash:     baseHash,
+					OurHash:      currentHash,
+					TheirHash:    branchHash,
+					OurContent:   ourContentBlob,
+					TheirContent: []byte{},
+					BranchName:   branchName,
+				}
+			}
+
+		case inBase && !inCurrent && inBranch:
+			// deleted in current
+			if slices.Equal(baseHash, branchHash) {
+				// unchanged in branch, so delete
+			} else {
+				// changed in branch and deleted in current so conflict
+				theirContentBlob, err := readBlob(branchHash)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				// add to conflicts map to write markers
+				conflicts[path] = Conflict{
+					BaseHash:     baseHash,
+					OurHash:      currentHash,
+					TheirHash:    branchHash,
+					OurContent:   []byte{},
+					TheirContent: theirContentBlob,
+					BranchName:   branchName,
+				}
+			}
+
+		case inBase && inCurrent && inBranch:
+			// present in all three
+			baseCurrentEq := slices.Equal(baseHash, currentHash)
+			baseBranchEq := slices.Equal(baseHash, branchHash)
+			currentBranchEq := slices.Equal(currentHash, branchHash)
+
+			switch {
+			case baseCurrentEq && baseBranchEq:
+				// unchanged in both
+				mergedIndex[path] = baseHash
+
+			case baseCurrentEq && !baseBranchEq:
+				// changed in branch only
+				mergedIndex[path] = branchHash
+
+			case !baseCurrentEq && baseBranchEq:
+				// changed in current only
+				mergedIndex[path] = currentHash
+
+			case currentBranchEq:
+				// changed in both to same value
+				mergedIndex[path] = currentHash
+
+			default:
+				// changed in both to different values so conflict
+				ourContentBlob, err := readBlob(currentHash)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				theirContentBlob, err := readBlob(branchHash)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				// add to conflicts map to write markers
+				conflicts[path] = Conflict{
+					BaseHash:     baseHash,
+					OurHash:      currentHash,
+					TheirHash:    branchHash,
+					OurContent:   ourContentBlob,
+					TheirContent: theirContentBlob,
+					BranchName:   branchName,
+				}
+			}
+		}
+	}
+
+	return mergedIndex, conflicts, nil
+}
+
 // mergeBranch merges the specified branch into the current branch.
 func mergeBranch(branchName string) error {
 	if err := checkVCSRepo(); err != nil {
@@ -510,180 +697,9 @@ func mergeBranch(branchName string) error {
 		return err
 	}
 
-	// collect all unique file paths
-	uniquePaths := make(map[string]struct{})
-	for path := range baseIndex {
-		uniquePaths[path] = struct{}{}
-	}
-
-	for path := range currentIndex {
-		uniquePaths[path] = struct{}{}
-	}
-
-	for path := range branchIndex {
-		uniquePaths[path] = struct{}{}
-	}
-
-	// perform a three-way merge
-	mergedIndex := make(map[string][]byte)
-	conflicts := make(map[string]Conflict)
-	for path := range uniquePaths {
-		baseHash, inBase := baseIndex[path]
-		currentHash, inCurrent := currentIndex[path]
-		branchHash, inBranch := branchIndex[path]
-
-		switch {
-		case !inBase && inCurrent && !inBranch:
-			// added in current only
-			mergedIndex[path] = currentHash
-
-		case !inBase && !inCurrent && inBranch:
-			// added in branch only
-			mergedIndex[path] = branchHash
-
-		case !inBase && inCurrent && inBranch:
-			// added in both so check for conflicts
-			if slices.Equal(currentHash, branchHash) {
-				mergedIndex[path] = currentHash
-			} else {
-				ourContent, err := catFile(currentHash)
-				if err != nil {
-					return err
-				}
-				ourContentBlob, ok := ourContent.(blobObject)
-				if !ok {
-					return fmt.Errorf("object %x is not a blob", currentHash)
-				}
-
-				theirContent, err := catFile(branchHash)
-				if err != nil {
-					return err
-				}
-				theirContentBlob, ok := theirContent.(blobObject)
-				if !ok {
-					return fmt.Errorf("object %x is not a blob", branchHash)
-				}
-
-				// add to conflicts map to write markers
-				conflicts[path] = Conflict{
-					BaseHash:     baseHash,
-					OurHash:      currentHash,
-					TheirHash:    branchHash,
-					OurContent:   ourContentBlob.content,
-					TheirContent: theirContentBlob.content,
-					BranchName:   branchName,
-				}
-			}
-
-		case inBase && !inCurrent && !inBranch:
-			// deleted in both
-
-		case inBase && inCurrent && !inBranch:
-			// deleted in branch
-			if slices.Equal(baseHash, currentHash) {
-				// unchanged in current, so delete
-			} else {
-				// changed in current and deleted in branch so conflict
-				ourContent, err := catFile(currentHash)
-				if err != nil {
-					return err
-				}
-				ourContentBlob, ok := ourContent.(blobObject)
-				if !ok {
-					return fmt.Errorf("object %x is not a blob", currentHash)
-				}
-
-				// add to conflicts map to write markers
-				conflicts[path] = Conflict{
-					BaseHash:     baseHash,
-					OurHash:      currentHash,
-					TheirHash:    branchHash,
-					OurContent:   ourContentBlob.content,
-					TheirContent: []byte{},
-					BranchName:   branchName,
-				}
-			}
-
-		case inBase && !inCurrent && inBranch:
-			// deleted in current
-			if slices.Equal(baseHash, branchHash) {
-				// unchanged in branch, so delete
-			} else {
-				// changed in branch and deleted in current so conflict
-				theirContent, err := catFile(branchHash)
-				if err != nil {
-					return err
-				}
-				theirContentBlob, ok := theirContent.(blobObject)
-				if !ok {
-					return fmt.Errorf("object %x is not a blob", branchHash)
-				}
-
-				// add to conflicts map to write markers
-				conflicts[path] = Conflict{
-					BaseHash:     baseHash,
-					OurHash:      currentHash,
-					TheirHash:    branchHash,
-					OurContent:   []byte{},
-					TheirContent: theirContentBlob.content,
-					BranchName:   branchName,
-				}
-			}
-
-		case inBase && inCurrent && inBranch:
-			// present in all three
-			baseCurrentEq := slices.Equal(baseHash, currentHash)
-			baseBranchEq := slices.Equal(baseHash, branchHash)
-			currentBranchEq := slices.Equal(currentHash, branchHash)
-
-			switch {
-			case baseCurrentEq && baseBranchEq:
-				// unchanged in both
-				mergedIndex[path] = baseHash
-
-			case baseCurrentEq && !baseBranchEq:
-				// changed in branch only
-				mergedIndex[path] = branchHash
-
-			case !baseCurrentEq && baseBranchEq:
-				// changed in current only
-				mergedIndex[path] = currentHash
-
-			case currentBranchEq:
-				// changed in both to same value
-				mergedIndex[path] = currentHash
-
-			default:
-				// changed in both to different values so conflict
-				ourContent, err := catFile(currentHash)
-				if err != nil {
-					return err
-				}
-				ourContentBlob, ok := ourContent.(blobObject)
-				if !ok {
-					return fmt.Errorf("object %x is not a blob", currentHash)
-				}
-
-				theirContent, err := catFile(branchHash)
-				if err != nil {
-					return err
-				}
-				theirContentBlob, ok := theirContent.(blobObject)
-				if !ok {
-					return fmt.Errorf("object %x is not a blob", branchHash)
-				}
-
-				// add to conflicts map to write markers
-				conflicts[path] = Conflict{
-					BaseHash:     baseHash,
-					OurHash:      currentHash,
-					TheirHash:    branchHash,
-					OurContent:   ourContentBlob.content,
-					TheirContent: theirContentBlob.content,
-					BranchName:   branchName,
-				}
-			}
-		}
+	mergedIndex, conflicts, err := calculateMergeWithReadBlob(baseIndex, currentIndex, branchIndex, branchName)
+	if err != nil {
+		return err
 	}
 
 	// write merged index to working directory
