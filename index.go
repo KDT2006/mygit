@@ -7,7 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+
+	"github.com/fatih/color"
 )
 
 // readIndex reads and parses the index file into a map.
@@ -134,4 +137,77 @@ func addDirectory(dirPath string) error {
 	}
 
 	return nil
+}
+
+// computeStatus computes the status of the working directory
+func computeStatus() ([]string, []string, error) {
+	index, err := readIndex()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var modifiedFiles []string
+	var unstagedFiles []string
+
+	// Check for modified files
+	for path, hash := range index {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error reading file %s: %v", path, err)
+		}
+
+		hashed := hashObject(content)
+		if !slices.Equal(hashed, hash) {
+			modifiedFiles = append(modifiedFiles, path)
+		}
+	}
+
+	// check for unstaged files
+	err = filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() && d.Name() == "."+vcsName {
+			return filepath.SkipDir // skip VCS dir
+		}
+
+		if !d.IsDir() {
+			if _, ok := index[path]; !ok {
+				unstagedFiles = append(unstagedFiles, path)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("error walking directory for unstaged files: %v", err)
+	}
+
+	return modifiedFiles, unstagedFiles, nil
+}
+
+// printStatus prints the status of modified and unstaged files
+func printStatus(modifiedFiles, unstagedFiles []string) {
+	if len(modifiedFiles) == 0 && len(unstagedFiles) == 0 {
+		fmt.Println("Working directory clean.")
+		return
+	}
+
+	// print modified files
+	for _, file := range modifiedFiles {
+		color.Red("modified:   %s", file)
+	}
+
+	if len(modifiedFiles) > 0 && len(unstagedFiles) > 0 {
+		for range 1 {
+			fmt.Println()
+		}
+	}
+
+	// print unstaged files
+	for _, file := range unstagedFiles {
+		color.Yellow("unstaged:   %s", file)
+	}
 }

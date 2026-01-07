@@ -44,6 +44,8 @@ func main() {
 		handleRemove()
 	case "merge":
 		handleMerge()
+	case "status":
+		handleStatus()
 	default:
 		fmt.Printf("unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -500,4 +502,18 @@ func handleMerge() {
 	if err := mergeBranch(branchName); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func handleStatus() {
+	// define a flag set for status
+	cmd := flag.NewFlagSet("status", flag.ExitOnError)
+
+	cmd.Parse(os.Args[2:])
+
+	modifiedFiles, unstagedFiles, err := computeStatus()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	printStatus(modifiedFiles, unstagedFiles)
 }
