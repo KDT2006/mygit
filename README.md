@@ -8,7 +8,7 @@ mygit is a small, educational re-implementation of core Git concepts written in 
 - Blob/tree/commit objects with minimal, readable formats
 - Lightweight index that maps file paths to blob hashes
 - Basic refs in `.mygit/refs/heads/` and `HEAD`
-- Core commands: `init`, `hash-object`, `add`, `rm`, `write-tree`, `cat-file`, `commit`, `log`, `branch`, `checkout`, `merge`
+- Core commands: `init`, `hash-object`, `add`, `rm`, `write-tree`, `cat-file`, `commit`, `log`, `branch`, `checkout`, `merge`, `status`
 
 ## Quick Start
 
@@ -43,6 +43,9 @@ echo "Hello mygit" > hello.txt
 
 # View history
 ./mygit log
+
+# Check working directory status
+./mygit status
 ```
 
 Branches and checkout:
@@ -117,7 +120,17 @@ log                       Print commit history from current HEAD
 branch [<name>]           List branches or create a new one at HEAD
 checkout <branch>         Switch to a branch and restore the working tree
 merge <branch>            Merge the given branch into current (fast-forward or 3-way; conflicts pause for manual resolution)
+status                    Show working directory status (modified tracked files vs index, and files not yet in the index)
 ```
+
+### Status output
+
+`mygit status` prints a minimal working directory summary:
+
+- `modified:` files that are currently in the index, but whose on-disk content no longer matches the blob hash recorded in the index.
+- `unstaged:` files that exist in the working directory but are not in the index yet (untracked files).
+
+If neither category has entries, it prints `Working directory clean.`
 
 ## Design Goals & Limitations
 
