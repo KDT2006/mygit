@@ -139,8 +139,8 @@ func addDirectory(dirPath string) error {
 	return nil
 }
 
-// computeStatus computes the status of the working directory
-func computeStatus() ([]string, []string, error) {
+// getStatus computes the status of the working directory
+func getStatus() ([]string, []string, error) {
 	index, err := readIndex()
 	if err != nil {
 		return nil, nil, err

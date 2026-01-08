@@ -46,6 +46,8 @@ func main() {
 		handleMerge()
 	case "status":
 		handleStatus()
+	case "reset":
+		handleReset()
 	default:
 		fmt.Printf("unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -510,10 +512,60 @@ func handleStatus() {
 
 	cmd.Parse(os.Args[2:])
 
-	modifiedFiles, unstagedFiles, err := computeStatus()
+	modifiedFiles, unstagedFiles, err := getStatus()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	printStatus(modifiedFiles, unstagedFiles)
+}
+
+func handleReset() {
+	// define a flag set for reset
+	cmd := flag.NewFlagSet("reset", flag.ExitOnError)
+
+	soft := cmd.Bool("soft", false, "move HEAD only (keep index and working tree)")
+	mixed := cmd.Bool("mixed", false, "move HEAD and reset index (keep working tree) (default)")
+	hard := cmd.Bool("hard", false, "move HEAD, reset index and working tree")
+
+	cmd.Parse(os.Args[2:])
+
+	args := cmd.Args()
+	if len(args) != 1 {
+		fmt.Println("usage: " + vcsName + " reset [--soft|--mixed|--hard] <commit-hash>")
+		os.Exit(1)
+	}
+
+	// ensure only one is set
+	modeCount := 0
+	if *soft {
+		modeCount++
+	}
+	if *mixed {
+		modeCount++
+	}
+	if *hard {
+		modeCount++
+	}
+	if modeCount > 1 {
+		fmt.Println("please specify only one of --soft, --mixed, or --hard")
+		os.Exit(1)
+	}
+
+	mode := resetModeMixed // default
+	if *soft {
+		mode = resetModeSoft
+	} else if *hard {
+		mode = resetModeHard
+	}
+
+	// decode hex string to binary
+	commitHash, err := hex.DecodeString(args[0])
+	if err != nil {
+		log.Fatalf("invalid commit hash: %v", err)
+	}
+
+	if err := resetToCommit(commitHash, mode); err != nil {
+		log.Fatal(err)
+	}
 }

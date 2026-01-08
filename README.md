@@ -8,7 +8,7 @@ mygit is a small, educational re-implementation of core Git concepts written in 
 - Blob/tree/commit objects with minimal, readable formats
 - Lightweight index that maps file paths to blob hashes
 - Basic refs in `.mygit/refs/heads/` and `HEAD`
-- Core commands: `init`, `hash-object`, `add`, `rm`, `write-tree`, `cat-file`, `commit`, `log`, `branch`, `checkout`, `merge`, `status`
+- Core commands: `init`, `hash-object`, `add`, `rm`, `write-tree`, `cat-file`, `commit`, `log`, `branch`, `checkout`, `merge`, `status`, `reset`
 
 ## Quick Start
 
@@ -56,6 +56,19 @@ Branches and checkout:
 
 # Switch branches and restore the working tree
 ./mygit checkout feature-x
+```
+
+Reset:
+
+```bash
+# Default is like `git reset --mixed`: move HEAD and reset index (working tree unchanged)
+./mygit reset <commit-hash>
+
+# Move HEAD only (keep index and working tree)
+./mygit reset --soft <commit-hash>
+
+# Move HEAD + reset index + reset working tree to target commit
+./mygit reset --hard <commit-hash>
 ```
 
 Merging (fast-forward or 3-way, with conflicts):
@@ -121,22 +134,17 @@ branch [<name>]           List branches or create a new one at HEAD
 checkout <branch>         Switch to a branch and restore the working tree
 merge <branch>            Merge the given branch into current (fast-forward or 3-way; conflicts pause for manual resolution)
 status                    Show working directory status (modified tracked files vs index, and files not yet in the index)
+reset [--soft|--mixed|--hard] <commit-hash>
+						  Move current branch HEAD to a commit.
+						  --soft: move HEAD only; --mixed (default): reset index; --hard: reset index + working tree
 ```
-
-### Status output
-
-`mygit status` prints a minimal working directory summary:
-
-- `modified:` files that are currently in the index, but whose on-disk content no longer matches the blob hash recorded in the index.
-- `unstaged:` files that exist in the working directory but are not in the index yet (untracked files).
-
-If neither category has entries, it prints `Working directory clean.`
 
 ## Design Goals & Limitations
 
 - Educational clarity over completeness and performance
 - No networking/remotes, advanced merge strategies, or automatic conflict resolution (conflicts are left for the user to resolve)
 - Detached `HEAD` is not supported
+- Reset is not allowed during an in-progress merge
 
 ## Project Structure
 

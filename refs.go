@@ -24,6 +24,15 @@ type Conflict struct {
 // readBlobFunc is a function type for reading blob content given its hash.
 type readBlobFunc func([]byte) ([]byte, error)
 
+// resetMode defines the mode of git reset operation.
+type resetMode int
+
+const (
+	resetModeSoft resetMode = iota
+	resetModeMixed
+	resetModeHard
+)
+
 // getHEAD reads the HEAD file to get the current branch reference.
 func getHEAD() (string, error) {
 	if err := checkVCSRepo(); err != nil {
@@ -860,4 +869,84 @@ func isConflictsResolved(index map[string][]byte) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// resetToCommit resets the current branch to the specified commit hash
+func resetToCommit(commitHash []byte, mode resetMode) error {
+	if err := checkVCSRepo(); err != nil {
+		return err
+	}
+
+	// disallow reset during merge
+	yes, err := isMergeInProgress()
+	if err != nil {
+		return err
+	}
+	if yes {
+		return fmt.Errorf("cannot reset during an ongoing merge")
+	}
+
+	head, err := getHEAD()
+	if err != nil {
+		return err
+	}
+
+	obj, err := catFile(commitHash)
+	if err != nil {
+		return err
+	}
+
+	commit, ok := obj.(commitObject)
+	if !ok {
+		return fmt.Errorf("object %x is not a commit", commitHash)
+	}
+
+	// read old index in case of hard reset
+	var oldIndex map[string][]byte
+	if mode == resetModeHard {
+		oldIndex, err = readIndex()
+		if err != nil {
+			return err
+		}
+	}
+
+	// move current branch's reference to point to commitHash
+	if err := updateRef(head, commitHash); err != nil {
+		return err
+	}
+
+	// update index/working dir based on mode
+	switch mode {
+	case resetModeSoft:
+		return nil
+
+	case resetModeMixed:
+		// build new index from commit without writing files
+		newIndex, err := buildIndexFromTree(commit.hash, "", false)
+		if err != nil {
+			return err
+		}
+
+		return writeIndex(newIndex)
+
+	case resetModeHard:
+		// build new index from commit and write files to working dir
+		newIndex, err := buildIndexFromTree(commit.hash, "", true)
+		if err != nil {
+			return err
+		}
+
+		if err := writeIndex(newIndex); err != nil {
+			return err
+		}
+
+		if err := removeObsoleteFiles(oldIndex, newIndex); err != nil {
+			return err
+		}
+
+	default:
+		return fmt.Errorf("unknown reset mode")
+	}
+
+	return nil
 }
