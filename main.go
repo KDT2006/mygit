@@ -48,6 +48,8 @@ func main() {
 		handleStatus()
 	case "reset":
 		handleReset()
+	case "config":
+		handleConfig()
 	default:
 		fmt.Printf("unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -566,6 +568,35 @@ func handleReset() {
 	}
 
 	if err := resetToCommit(commitHash, mode); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func handleConfig() {
+	// define a flag set for config
+	cmd := flag.NewFlagSet("config", flag.ExitOnError)
+
+	cmd.Parse(os.Args[2:])
+
+	args := cmd.Args()
+	if len(args) != 1 && len(args) != 2 {
+		fmt.Println("usage: " + vcsName + " config <user.[name|email]> [<value>]")
+		os.Exit(1)
+	}
+
+	parts := strings.SplitN(args[0], ".", 2)
+	key := parts[1]
+	if len(args) == 1 {
+		value, err := getConfig(key)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Println(value)
+		return
+	}
+
+	if err := updateConfig(key, args[1]); err != nil {
 		log.Fatal(err)
 	}
 }

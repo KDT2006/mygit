@@ -330,9 +330,14 @@ func writeCommitObject(treeHash []byte, parentHashes [][]byte, message string) (
 		buf.WriteString(fmt.Sprintf("parent %x\n", parentHash))
 	}
 
-	// TODO: replace with actual author/committer info
-	author := "Author <author@example.com>"
-	committer := "Committer <committer@example.com>"
+	// replace with actual author/committer info (use same for both here)
+	user, err := getConfig("user.email")
+	if err != nil {
+		return nil, err
+	}
+
+	author := fmt.Sprintf("Author <%s>", user)
+	committer := fmt.Sprintf("Committer <%s>", user)
 
 	buf.WriteString(fmt.Sprintf("author %s\n", author))
 	buf.WriteString(fmt.Sprintf("committer %s\n", committer))
@@ -586,4 +591,71 @@ func printCommitHistory(commitHash []byte) error {
 	}
 
 	return printCommitHistory(commitObj.parents[0])
+}
+
+// getConfig retrieves the value for the given key from the config file.
+func getConfig(key string) (string, error) {
+	if err := checkVCSRepo(); err != nil {
+		return "", err
+	}
+
+	configPath := fmt.Sprintf(".%s/config", vcsName)
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", fmt.Errorf("error reading config file: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		parts := strings.Split(line, "=")
+		if len(parts) != 2 {
+			continue
+		}
+
+		if strings.TrimSpace(parts[0]) == key {
+			return strings.TrimSpace(parts[1]), nil
+		}
+	}
+
+	return "", fmt.Errorf("key %s not found in config", key)
+}
+
+// updateConfig updates the config file with the new key-value pair.
+func updateConfig(key, value string) error {
+	if err := checkVCSRepo(); err != nil {
+		return err
+	}
+
+	configPath := fmt.Sprintf(".%s/config", vcsName)
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("error reading config file: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	updated := false
+	for i, line := range lines {
+		parts := strings.Split(line, "=")
+		if len(parts) != 2 {
+			continue
+		}
+
+		if strings.TrimSpace(parts[0]) == key {
+			lines[i] = fmt.Sprintf("%s=%s", key, value)
+			updated = true
+			break
+		}
+	}
+
+	if !updated {
+		lines = append(lines, fmt.Sprintf("%s=%s", key, value))
+	}
+
+	newContent := strings.Join(lines, "\n")
+	err = os.WriteFile(configPath, []byte(newContent), 0644)
+	if err != nil {
+		return fmt.Errorf("error writing config file: %v", err)
+	}
+
+	return nil
 }

@@ -8,7 +8,7 @@ mygit is a small, educational re-implementation of core Git concepts written in 
 - Blob/tree/commit objects with minimal, readable formats
 - Lightweight index that maps file paths to blob hashes
 - Basic refs in `.mygit/refs/heads/` and `HEAD`
-- Core commands: `init`, `hash-object`, `add`, `rm`, `write-tree`, `cat-file`, `commit`, `log`, `branch`, `checkout`, `merge`, `status`, `reset`
+- Core commands: `init`, `hash-object`, `add`, `rm`, `write-tree`, `cat-file`, `commit`, `log`, `branch`, `checkout`, `merge`, `status`, `reset`, `config`
 
 ## Quick Start
 
@@ -27,6 +27,13 @@ Initialize a repository and make your first commit:
 ```bash
 # Initialize a new repository
 ./mygit init
+
+# Set identity info used by commits (stored in .mygit/config)
+./mygit config user.name "Your Name"
+./mygit config user.email "you@example.com"
+
+# Read a value back
+./mygit config user.name
 
 # Add a file or a directory (recursively)
 echo "Hello mygit" > hello.txt
@@ -118,6 +125,9 @@ On Windows, replace `./mygit` with `mygit.exe`. You can also use `go run . <comm
 - Refs & HEAD
 	- Branches live in `.mygit/refs/heads/<name>` and store the commit ID.
 	- `HEAD` contains `ref: refs/heads/<name>` (no detached HEAD handling yet).
+- Config
+	- A tiny key/value store in `.mygit/config` (created by `init`).
+	- Currently supports `user.name` and `user.email` via `mygit config user.name <value>` / `mygit config user.email <value>`.
 
 ## Commands
 
@@ -137,6 +147,8 @@ status                    Show working directory status (modified tracked files 
 reset [--soft|--mixed|--hard] <commit-hash>
 						  Move current branch HEAD to a commit.
 						  --soft: move HEAD only; --mixed (default): reset index; --hard: reset index + working tree
+config <user.[name|email]> [<value>]
+					  Get or set a config value in .mygit/config
 ```
 
 ## Design Goals & Limitations
