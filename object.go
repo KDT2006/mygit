@@ -331,7 +331,7 @@ func writeCommitObject(treeHash []byte, parentHashes [][]byte, message string) (
 	}
 
 	// replace with actual author/committer info (use same for both here)
-	user, err := getConfig("user.email")
+	user, err := getConfig("email")
 	if err != nil {
 		return nil, err
 	}
